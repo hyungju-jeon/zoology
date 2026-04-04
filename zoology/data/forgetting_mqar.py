@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from zoology.config import DataSegmentConfig
-from zoology.data.utils import DataSegment
+from zoology.data.utils import DataSegment, replace_zero_with_random_non_keys
 
 
 class ForgettingMQARConfig(DataSegmentConfig):
@@ -27,38 +27,38 @@ def forgetting_mqar(
     num_updates: int = 4,
     random_non_queries: bool = True,
     include_slices: bool = True,
-    **kwargs
+    **kwargs,
 ) -> DataSegment:
     """
     Generates synthetic data for the forgetting multi-query associative recall task.
-    
-    This extends the standard MQAR task by having some keys appear twice with 
-    different values. The model must remember the LAST (most recent) value for 
+
+    This extends the standard MQAR task by having some keys appear twice with
+    different values. The model must remember the LAST (most recent) value for
     each key, testing the ability to update/overwrite associations.
 
-    Example: 
-        `forgetting_mqar(vocab_size=100, num_kv_pairs=4, num_updates=2, input_seq_len=32, random_non_queries=False)` 
-        will generate input and label sequences of the form: 
-                
+    Example:
+        `forgetting_mqar(vocab_size=100, num_kv_pairs=4, num_updates=2, input_seq_len=32, random_non_queries=False)`
+        will generate input and label sequences of the form:
+
                 K   V   K   V   K   V   K   V   K   V   K   V        Queries
         Inputs: A   5   B   3   C   7   D   2   A   9   C   1   ...  A  ...  B  ...
         Labels: -100 ...                                             9       3
-        
+
         Keys A and C were updated, so queries return their NEW values (9, 1).
         Keys B and D were not updated, so queries return original values (3, 2).
 
     Args:
-        vocab_size (int): The size of the vocabulary. First half for keys, second 
+        vocab_size (int): The size of the vocabulary. First half for keys, second
             half for values.
         num_examples (int): The number of examples to generate.
         input_seq_len (int): The length of the input sequence.
         seed (int): The seed for the random number generator.
-        power_a (float, optional): The power for the power law distribution. 
+        power_a (float, optional): The power for the power law distribution.
             Defaults to 0.01.
         num_kv_pairs (int): The number of unique keys.
         num_updates (int): The number of keys that get reassigned a new value.
             Must be <= num_kv_pairs.
-        random_non_queries (bool, optional): If True, replace all the 0's with 
+        random_non_queries (bool, optional): If True, replace all the 0's with
             random values in the input. Defaults to True.
         include_slices (bool, optional): If True, include metadata slices.
 
@@ -68,12 +68,13 @@ def forgetting_mqar(
     assert input_seq_len % 2 == 0, "input_seq_len must be even"
     assert vocab_size > input_seq_len
     assert num_updates <= num_kv_pairs, "num_updates must be <= num_kv_pairs"
-    
+
     # Total KV slots: original pairs + updates
     total_kv_slots = num_kv_pairs + num_updates
     # 2 tokens per KV slot in context, 2 tokens per query (key + gap)
-    assert total_kv_slots * 2 + num_kv_pairs * 2 <= input_seq_len, \
-        f"Need at least {total_kv_slots * 2 + num_kv_pairs * 2} tokens. Got {input_seq_len}."
+    assert (
+        total_kv_slots * 2 + num_kv_pairs * 2 <= input_seq_len
+    ), f"Need at least {total_kv_slots * 2 + num_kv_pairs * 2} tokens. Got {input_seq_len}."
 
     np.random.seed(seed)
 
@@ -109,16 +110,18 @@ def forgetting_mqar(
     # Build context: [K0 V0 K1 V1 ... Kn Vn | K0 V0' K1 V1' ... (updates)]
     # First, place all original KV pairs
     # Then, place updates for selected keys
-    
+
     # For each example, randomly select which keys get updated
-    update_indices = np.stack([
-        np.random.choice(num_kv_pairs, size=num_updates, replace=False)
-        for _ in range(num_examples)
-    ])
-    
+    update_indices = np.stack(
+        [
+            np.random.choice(num_kv_pairs, size=num_updates, replace=False)
+            for _ in range(num_examples)
+        ]
+    )
+
     # Get the keys and their new values for updates
     update_keys = np.take_along_axis(keys, update_indices, axis=1)
-    
+
     # Final values: start with original, then overwrite updated ones
     final_values = original_values.copy()
     for i in range(num_examples):
@@ -157,22 +160,34 @@ def forgetting_mqar(
     labels = np.full((num_examples, input_seq_len + 1), -100, dtype=np.int64)
     np.put_along_axis(labels, (gaps * 2) + context_size + 1, values=final_values, axis=1)
 
-    inputs, labels = torch.tensor(examples[:, :-1]), torch.tensor(labels[:, 1:])
+    inputs_np = examples[:, :-1].copy()
 
-    # Replace zeros with random values
+    # Replace filler zeros with non-zero IDs that cannot equal any real key in the same
+    # example. Without this rejection, overwritten keys can reappear as fake unlabeled
+    # suffix queries and directly contaminate the forgetting signal.
     if random_non_queries:
-        inputs[inputs == 0] = torch.randint(vocab_size, size=inputs.shape)[inputs == 0]
+        inputs_np = replace_zero_with_random_non_keys(
+            inputs_np,
+            keys,
+            vocab_size=vocab_size,
+            seed=int(seed) + 1_337,
+            min_token=1,
+        )
+
+    inputs, labels = torch.tensor(inputs_np), torch.tensor(labels[:, 1:])
 
     return DataSegment(
         inputs,
         labels,
-        slices={
-            "num_kv_pairs": num_kv_pairs,
-            "num_updates": num_updates,
-            "input_seq_len": input_seq_len,
-        }
-        if include_slices
-        else {},
+        slices=(
+            {
+                "num_kv_pairs": num_kv_pairs,
+                "num_updates": num_updates,
+                "input_seq_len": input_seq_len,
+            }
+            if include_slices
+            else {}
+        ),
     )
 
 
@@ -220,4 +235,3 @@ if __name__ == "__main__":
             expected = result.labels[i][pos].item()
             print(f"    Key {key} -> {expected}")
         print()
-        

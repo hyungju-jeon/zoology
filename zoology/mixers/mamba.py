@@ -164,8 +164,7 @@ class Mamba(nn.Module):
                     x,
                     rearrange(self.conv1d.weight, "d 1 w -> d w"),
                     self.conv1d.bias,
-                    None,
-                    self.activation,
+                    activation=self.activation,
                 )
 
             # We're careful here about the layout, to avoid extra transposes.
@@ -294,4 +293,3 @@ def MambaInit(
                 nn.init.kaiming_uniform_(p, a=math.sqrt(5))
                 with torch.no_grad():
                     p /= math.sqrt(n_residuals_per_layer * n_layer)
-

@@ -3,7 +3,17 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.ops import StochasticDepth
+try:
+    from torchvision.ops import StochasticDepth
+except ImportError:
+    class StochasticDepth(nn.Module):
+        def __init__(self, p: float, mode: str = "row"):
+            super().__init__()
+            self.p = float(p)
+            self.mode = mode
+
+        def forward(self, x):
+            return x
 
 from zoology.config import ModelConfig
 
@@ -18,7 +28,7 @@ class TokenEmbeddings(nn.Module):
         word_embed_proj_dim=None,
         learnable: bool = True,
         init_type: str = "default",  # "default", "spherical", "normal"
-        device='cuda',
+        device='cpu',
         dtype=torch.float32,
     ):
         """
@@ -117,7 +127,7 @@ class TokenEmbeddings(nn.Module):
         if self.max_position_embeddings > 0:
             if position_ids is None:
                 position_ids = torch.arange(
-                    seqlen, dtype=torch.long, device=self.device
+                    seqlen, dtype=torch.long, device=input_ids.device
                 )
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings

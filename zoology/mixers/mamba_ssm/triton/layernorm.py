@@ -471,10 +471,30 @@ def layer_norm_fn(
     residual_in_fp32=False,
     is_rms_norm=False,
 ):
+    if not x.is_cuda:
+        return layer_norm_ref(
+            x,
+            weight,
+            bias,
+            residual=residual,
+            eps=eps,
+            prenorm=prenorm,
+            upcast=residual_in_fp32,
+        )
     return LayerNormFn.apply(x, weight, bias, residual, eps, prenorm, residual_in_fp32, is_rms_norm)
 
 
 def rms_norm_fn(x, weight, bias, residual=None, prenorm=False, residual_in_fp32=False, eps=1e-6):
+    if not x.is_cuda:
+        return rms_norm_ref(
+            x,
+            weight,
+            bias,
+            residual=residual,
+            eps=eps,
+            prenorm=prenorm,
+            upcast=residual_in_fp32,
+        )
     return LayerNormFn.apply(x, weight, bias, residual, eps, prenorm, residual_in_fp32, True)
 
 

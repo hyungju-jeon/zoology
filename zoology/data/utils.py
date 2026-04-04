@@ -11,6 +11,82 @@ from torch.utils.data import DataLoader, Dataset
 
 from zoology.config import DataConfig, DataSegmentConfig
 
+
+def replace_zero_with_random_non_keys(
+    tokens: np.ndarray,
+    forbidden_tokens: np.ndarray,
+    *,
+    vocab_size: int,
+    seed: int,
+    min_token: int = 1,
+) -> np.ndarray:
+    """
+    Replace zero-valued filler tokens with random token IDs that cannot collide with
+    per-example forbidden tokens, such as the active query keys.
+
+    This runs row-wise on purpose: it avoids materializing a large
+    `[num_examples, seq_len, num_forbidden]` collision tensor while still using
+    vectorized rejection sampling within each example.
+    """
+    if tokens.ndim != 2:
+        raise ValueError(f"`tokens` must be rank-2, got shape={tokens.shape}.")
+    if forbidden_tokens.ndim != 2:
+        raise ValueError(
+            f"`forbidden_tokens` must be rank-2, got shape={forbidden_tokens.shape}."
+        )
+    if tokens.shape[0] != forbidden_tokens.shape[0]:
+        raise ValueError(
+            "Leading dimension mismatch between `tokens` and `forbidden_tokens`: "
+            f"{tokens.shape[0]} vs {forbidden_tokens.shape[0]}."
+        )
+    if min_token < 0:
+        raise ValueError(f"`min_token` must be >= 0, got {min_token}.")
+    if vocab_size <= min_token:
+        raise ValueError(
+            f"`vocab_size` must be greater than `min_token`, got vocab_size={vocab_size}, "
+            f"min_token={min_token}."
+        )
+
+    zero_mask = tokens == 0
+    if not zero_mask.any():
+        return tokens
+
+    rng = np.random.default_rng(int(seed))
+    rows_with_zeros = np.flatnonzero(zero_mask.any(axis=1))
+
+    for row_idx in rows_with_zeros.tolist():
+        row_zero_mask = zero_mask[row_idx]
+        n_missing = int(row_zero_mask.sum())
+        blocked = np.unique(forbidden_tokens[row_idx])
+        blocked = blocked[blocked >= min_token]
+
+        if blocked.size >= (vocab_size - min_token):
+            raise ValueError(
+                "No valid replacement tokens remain after excluding forbidden tokens for "
+                f"row {row_idx}. blocked={blocked.size}, available={vocab_size - min_token}."
+            )
+
+        draws = rng.integers(
+            min_token,
+            vocab_size,
+            size=n_missing,
+            dtype=tokens.dtype,
+        )
+        if blocked.size > 0:
+            bad = np.isin(draws, blocked, assume_unique=True)
+            while bad.any():
+                draws[bad] = rng.integers(
+                    min_token,
+                    vocab_size,
+                    size=int(bad.sum()),
+                    dtype=tokens.dtype,
+                )
+                bad = np.isin(draws, blocked, assume_unique=True)
+
+        tokens[row_idx, row_zero_mask] = draws
+
+    return tokens
+
 @dataclass
 class DataSegment:
     inputs: torch.Tensor
@@ -174,4 +250,3 @@ class _SyntheticDataset(Dataset):
 
     def __len__(self):
         return len(self.batches)
-
