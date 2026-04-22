@@ -308,7 +308,7 @@ class Hyena(nn.Module):
             y: (b, l, d) tensor
         """
         l = u.size(1)
-        assert l <= self.l_max, f"Input length {l} exceeds maximum length {self.max_l}"
+        assert l <= self.l_max, f"Input length {l} exceeds maximum length {self.l_max}"
 
         # in projection
         u = self.in_proj(u)
