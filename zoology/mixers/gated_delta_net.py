@@ -262,7 +262,6 @@ class GatedDeltaNet(nn.Module):
                 initial_state=recurrent_state,
                 output_final_state=use_cache,
                 cu_seqlens=cu_seqlens,
-                head_first=False,
                 use_qk_l2norm_in_kernel=True
             )
         elif mode == 'fused_recurrent':
@@ -275,7 +274,6 @@ class GatedDeltaNet(nn.Module):
                 initial_state=recurrent_state,
                 output_final_state=use_cache,
                 cu_seqlens=cu_seqlens,
-                head_first=False,
                 use_qk_l2norm_in_kernel=True
             )
         if past_key_values is not None:
@@ -302,4 +300,3 @@ class GatedDeltaNet(nn.Module):
             self.num_heads * self.head_k_dim * self.head_v_dim
         )
         return state_size 
-

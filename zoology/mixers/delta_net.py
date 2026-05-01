@@ -250,7 +250,6 @@ class DeltaNet(nn.Module):
                 initial_state=recurrent_state,
                 output_final_state=use_cache,
                 cu_seqlens=cu_seqlens,
-                head_first=False,
                 use_qk_l2norm_in_kernel=True if self.qk_norm == 'l2' else False
             )
         elif mode == 'chunk':
@@ -262,7 +261,6 @@ class DeltaNet(nn.Module):
                 initial_state=recurrent_state,
                 output_final_state=use_cache,
                 cu_seqlens=cu_seqlens,
-                head_first=False,
                 use_qk_l2norm_in_kernel=True if self.qk_norm == 'l2' else False
             )
         else:
@@ -293,4 +291,3 @@ class DeltaNet(nn.Module):
             self.num_heads * self.head_k_dim * self.head_v_dim
         )
         return state_size 
-
