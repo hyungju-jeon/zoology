@@ -86,14 +86,23 @@ def forgetting_mqar(
     key_choices = np.arange(1, key_vocab_size)
     value_choices = np.arange(key_vocab_size, vocab_size)
 
+    # Random mapping per example ensures the key/value token partitions are not
+    # predictable globally across the dataset.
+    map_rng = np.random.RandomState(seed)
+    random_maps = (
+        np.stack([map_rng.permutation(vocab_size) for _ in range(num_examples)], axis=0)
+        if num_examples > 0
+        else np.empty((0, vocab_size), dtype=np.int64)
+    )
+
     # Generate unique keys for each example
-    keys_unshuffled = np.tile(key_choices, (num_examples, 1))
+    keys_unshuffled = random_maps[:, key_choices]
     keys = np.apply_along_axis(
         np.random.choice, 1, keys_unshuffled, replace=False, size=num_kv_pairs
     )
 
     # Generate original values (one per key)
-    values_unshuffled = np.tile(value_choices, (num_examples, 1))
+    values_unshuffled = random_maps[:, value_choices]
     original_values = np.apply_along_axis(
         np.random.choice, 1, values_unshuffled, replace=False, size=num_kv_pairs
     )
@@ -104,7 +113,7 @@ def forgetting_mqar(
     for i in range(num_examples):
         for j in range(num_updates):
             # Pick a value different from the original
-            available = value_choices[value_choices != original_values[i, j]]
+            available = values_unshuffled[i][values_unshuffled[i] != original_values[i, j]]
             updated_values[i, j] = np.random.choice(available)
 
     # Build context: [K0 V0 K1 V1 ... Kn Vn | K0 V0' K1 V1' ... (updates)]

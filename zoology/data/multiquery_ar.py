@@ -100,12 +100,21 @@ def multiquery_ar(
     key_choices = np.arange(1, key_vocab_size)
     value_choices = np.arange(key_vocab_size, vocab_size)
 
-    keys_unshuffled = np.tile(key_choices, (num_examples, 1))
+    # Random mapping per example ensures the key/value token partitions are not
+    # predictable globally across the dataset.
+    map_rng = np.random.RandomState(seed)
+    random_maps = (
+        np.stack([map_rng.permutation(vocab_size) for _ in range(num_examples)], axis=0)
+        if num_examples > 0
+        else np.empty((0, vocab_size), dtype=np.int64)
+    )
+
+    keys_unshuffled = random_maps[:, key_choices]
     keys = np.apply_along_axis(
         np.random.choice, 1, keys_unshuffled, replace=False, size=num_kv_pairs
     )
 
-    values_unshuffled = np.tile(value_choices, (num_examples, 1))
+    values_unshuffled = random_maps[:, value_choices]
     values = np.apply_along_axis(
         np.random.choice, 1, values_unshuffled, replace=False, size=num_kv_pairs
     )
