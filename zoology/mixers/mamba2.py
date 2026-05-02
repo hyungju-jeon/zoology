@@ -146,8 +146,6 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
             (in case batch is small).
         Returns: same shape as u
         """
-        import torch
-        torch.autograd.set_detect_anomaly(True)
         seqlen_og = seqlen
         if seqlen is None:
             batch, seqlen, dim = u.shape
@@ -307,4 +305,3 @@ class Mamba2Block(nn.Module):
             )
         hidden_states = self.mixer(hidden_states, inference_params=inference_params, **mixer_kwargs)
         return hidden_states, residual
-

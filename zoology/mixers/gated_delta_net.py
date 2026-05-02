@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
 import torch
@@ -168,9 +169,10 @@ class GatedDeltaNet(nn.Module):
                 activation='silu'
             )
         else:
-            raise UserWarning(
+            warnings.warn(
                 "ShortConvolution is crucial to the performance. "
-                "Do not turn it off, i.e., setting `use_short_conv=False` unless you know what you are doing."
+                "Do not turn it off, i.e., setting `use_short_conv=False` unless you know what you are doing.",
+                stacklevel=2,
             )
         if use_gate:
             self.g_proj = nn.Linear(hidden_size, self.value_dim, bias=False)
