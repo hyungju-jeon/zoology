@@ -325,7 +325,7 @@ class Hyena(nn.Module):
             v=self.head_dim * self.NUM_PROJECTIONS,
         )
 
-        x1, x2, v = uc.split(self.d_model, dim=2)
+        x1, x2, v = uc.split(self.head_dim, dim=2)
 
         # pre-gating
         v = v * x1
