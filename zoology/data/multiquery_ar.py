@@ -10,6 +10,7 @@ class MQARConfig(DataSegmentConfig):
     power_a: float = 0.01
     num_kv_pairs: int = 8
     random_non_queries: bool = True
+    shuffle_kv_set: bool = False
     include_slices: bool = True
 
     def build(self, seed: int) -> DataSegment:
@@ -25,6 +26,7 @@ def multiquery_ar(
     num_kv_pairs: int = 8,
     num_passes: int = 1,
     random_non_queries: bool = True,
+    shuffle_kv_set: bool = False,
     include_slices: bool = True,
     **kwargs,
 ) -> DataSegment:
@@ -100,24 +102,31 @@ def multiquery_ar(
     key_choices = np.arange(1, key_vocab_size)
     value_choices = np.arange(key_vocab_size, vocab_size)
 
-    # Random mapping per example ensures the key/value token partitions are not
-    # predictable globally across the dataset.
-    map_rng = np.random.RandomState(seed)
-    random_maps = (
-        np.stack([map_rng.permutation(vocab_size) for _ in range(num_examples)], axis=0)
-        if num_examples > 0
-        else np.empty((0, vocab_size), dtype=np.int64)
-    )
+    if shuffle_kv_set:
+        token_choices = np.arange(1, vocab_size)
+        shuffled_choices = (
+            np.stack([np.random.permutation(token_choices) for _ in range(num_examples)], axis=0)
+            if num_examples > 0
+            else np.empty((0, vocab_size - 1), dtype=np.int64)
+        )
+        keys_unshuffled = shuffled_choices[:, : key_choices.shape[0]]
+        values_unshuffled = shuffled_choices[
+            :, key_choices.shape[0] : key_choices.shape[0] + value_choices.shape[0]
+        ]
+    else:
+        keys_unshuffled = np.tile(key_choices, (num_examples, 1))
+        values_unshuffled = np.tile(value_choices, (num_examples, 1))
 
-    keys_unshuffled = random_maps[:, key_choices]
-    keys = np.apply_along_axis(
-        np.random.choice, 1, keys_unshuffled, replace=False, size=num_kv_pairs
-    )
-
-    values_unshuffled = random_maps[:, value_choices]
-    values = np.apply_along_axis(
-        np.random.choice, 1, values_unshuffled, replace=False, size=num_kv_pairs
-    )
+    if num_examples > 0:
+        keys = np.apply_along_axis(
+            np.random.choice, 1, keys_unshuffled, replace=False, size=num_kv_pairs
+        )
+        values = np.apply_along_axis(
+            np.random.choice, 1, values_unshuffled, replace=False, size=num_kv_pairs
+        )
+    else:
+        keys = np.empty((0, num_kv_pairs), dtype=np.int64)
+        values = np.empty((0, num_kv_pairs), dtype=np.int64)
 
     # create sequences
     kvs = np.zeros((num_examples, context_size), dtype=np.int64)
@@ -164,5 +173,6 @@ def multiquery_ar(
             "num_kv_pairs": num_kv_pairs,
             "input_seq_len": input_seq_len,
             "num_passes": num_passes,
+            "shuffle_kv_set": bool(shuffle_kv_set),
         },
     )

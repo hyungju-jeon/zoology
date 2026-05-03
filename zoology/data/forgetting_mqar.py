@@ -11,6 +11,7 @@ class ForgettingMQARConfig(DataSegmentConfig):
     num_kv_pairs: int = 8
     num_updates: int = 4  # How many keys get reassigned
     random_non_queries: bool = True
+    shuffle_kv_set: bool = False
     include_slices: bool = True
 
     def build(self, seed: int) -> DataSegment:
@@ -26,6 +27,7 @@ def forgetting_mqar(
     num_kv_pairs: int = 8,
     num_updates: int = 4,
     random_non_queries: bool = True,
+    shuffle_kv_set: bool = False,
     include_slices: bool = True,
     **kwargs,
 ) -> DataSegment:
@@ -86,35 +88,38 @@ def forgetting_mqar(
     key_choices = np.arange(1, key_vocab_size)
     value_choices = np.arange(key_vocab_size, vocab_size)
 
-    # Random mapping per example ensures the key/value token partitions are not
-    # predictable globally across the dataset.
-    map_rng = np.random.RandomState(seed)
-    random_maps = (
-        np.stack([map_rng.permutation(vocab_size) for _ in range(num_examples)], axis=0)
-        if num_examples > 0
-        else np.empty((0, vocab_size), dtype=np.int64)
-    )
+    if shuffle_kv_set:
+        token_choices = np.arange(1, vocab_size)
+        shuffled_choices = (
+            np.stack([np.random.permutation(token_choices) for _ in range(num_examples)], axis=0)
+            if num_examples > 0
+            else np.empty((0, vocab_size - 1), dtype=np.int64)
+        )
+        keys_unshuffled = shuffled_choices[:, : key_choices.shape[0]]
+        values_unshuffled = shuffled_choices[
+            :, key_choices.shape[0] : key_choices.shape[0] + value_choices.shape[0]
+        ]
+    else:
+        keys_unshuffled = np.tile(key_choices, (num_examples, 1))
+        values_unshuffled = np.tile(value_choices, (num_examples, 1))
 
-    # Generate unique keys for each example
-    keys_unshuffled = random_maps[:, key_choices]
-    keys = np.apply_along_axis(
-        np.random.choice, 1, keys_unshuffled, replace=False, size=num_kv_pairs
-    )
+    if num_examples > 0:
+        keys = np.apply_along_axis(
+            np.random.choice, 1, keys_unshuffled, replace=False, size=num_kv_pairs
+        )
+        sampled_values = np.apply_along_axis(
+            np.random.choice,
+            1,
+            values_unshuffled,
+            replace=False,
+            size=num_kv_pairs + num_updates,
+        )
+    else:
+        keys = np.empty((0, num_kv_pairs), dtype=np.int64)
+        sampled_values = np.empty((0, num_kv_pairs + num_updates), dtype=np.int64)
 
-    # Generate original values (one per key)
-    values_unshuffled = random_maps[:, value_choices]
-    original_values = np.apply_along_axis(
-        np.random.choice, 1, values_unshuffled, replace=False, size=num_kv_pairs
-    )
-
-    # Select which keys get updated (first num_updates keys, then we'll shuffle)
-    # Generate new values for updated keys (must be different from original)
-    updated_values = np.zeros((num_examples, num_updates), dtype=np.int64)
-    for i in range(num_examples):
-        for j in range(num_updates):
-            # Pick a value different from the original
-            available = values_unshuffled[i][values_unshuffled[i] != original_values[i, j]]
-            updated_values[i, j] = np.random.choice(available)
+    original_values = sampled_values[:, :num_kv_pairs]
+    updated_values = sampled_values[:, num_kv_pairs : num_kv_pairs + num_updates]
 
     # Build context: [K0 V0 K1 V1 ... Kn Vn | K0 V0' K1 V1' ... (updates)]
     # First, place all original KV pairs
@@ -193,6 +198,7 @@ def forgetting_mqar(
                 "num_kv_pairs": num_kv_pairs,
                 "num_updates": num_updates,
                 "input_seq_len": input_seq_len,
+                "shuffle_kv_set": bool(shuffle_kv_set),
             }
             if include_slices
             else {}
