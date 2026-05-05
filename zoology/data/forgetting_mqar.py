@@ -9,7 +9,8 @@ class ForgettingMQARConfig(DataSegmentConfig):
     name: str = "forgetting_mqar"
     power_a: float = 0.01
     num_kv_pairs: int = 8
-    num_updates: int = 4  # How many keys get reassigned
+    num_updates: int = 4  # How many reassignment events to emit
+    multiple_update: bool = False
     random_non_queries: bool = True
     shuffle_kv_set: bool = False
     include_slices: bool = True
@@ -26,6 +27,7 @@ def forgetting_mqar(
     power_a: float = 0.01,
     num_kv_pairs: int = 8,
     num_updates: int = 4,
+    multiple_update: bool = False,
     random_non_queries: bool = True,
     shuffle_kv_set: bool = False,
     include_slices: bool = True,
@@ -58,8 +60,11 @@ def forgetting_mqar(
         power_a (float, optional): The power for the power law distribution.
             Defaults to 0.01.
         num_kv_pairs (int): The number of unique keys.
-        num_updates (int): The number of keys that get reassigned a new value.
-            Must be <= num_kv_pairs.
+        num_updates (int): The number of key reassignment events.
+            Must be <= num_kv_pairs unless multiple_update is True.
+        multiple_update (bool, optional): If True, update keys are sampled with
+            replacement, so one key can be overwritten more than once and
+            num_updates may exceed num_kv_pairs. Defaults to False.
         random_non_queries (bool, optional): If True, replace all the 0's with
             random values in the input. Defaults to True.
         include_slices (bool, optional): If True, include metadata slices.
@@ -69,7 +74,9 @@ def forgetting_mqar(
     """
     assert input_seq_len % 2 == 0, "input_seq_len must be even"
     assert vocab_size > input_seq_len
-    assert num_updates <= num_kv_pairs, "num_updates must be <= num_kv_pairs"
+    assert num_updates >= 0, "num_updates must be non-negative"
+    if not multiple_update:
+        assert num_updates <= num_kv_pairs, "num_updates must be <= num_kv_pairs"
 
     # Total KV slots: original pairs + updates
     total_kv_slots = num_kv_pairs + num_updates
@@ -125,13 +132,22 @@ def forgetting_mqar(
     # First, place all original KV pairs
     # Then, place updates for selected keys
 
-    # For each example, randomly select which keys get updated
-    update_indices = np.stack(
-        [
-            np.random.choice(num_kv_pairs, size=num_updates, replace=False)
-            for _ in range(num_examples)
-        ]
-    )
+    # For each example, select update events. The default samples distinct keys
+    # for backwards compatibility; multiple_update=True allows repeated overwrites
+    # of the same key, with the final update winning.
+    if num_examples > 0 and num_updates > 0:
+        update_indices = np.stack(
+            [
+                np.random.choice(
+                    num_kv_pairs,
+                    size=num_updates,
+                    replace=bool(multiple_update),
+                )
+                for _ in range(num_examples)
+            ]
+        )
+    else:
+        update_indices = np.empty((num_examples, num_updates), dtype=np.int64)
 
     # Get the keys and their new values for updates
     update_keys = np.take_along_axis(keys, update_indices, axis=1)
@@ -197,6 +213,7 @@ def forgetting_mqar(
             {
                 "num_kv_pairs": num_kv_pairs,
                 "num_updates": num_updates,
+                "multiple_update": bool(multiple_update),
                 "input_seq_len": input_seq_len,
                 "shuffle_kv_set": bool(shuffle_kv_set),
             }
