@@ -1,18 +1,21 @@
 from datetime import datetime
 import os
 import importlib.util
+from typing import TYPE_CHECKING
 
 import click
 from tqdm import tqdm
 
-from zoology.train import train
-from zoology.config import TrainConfig
+if TYPE_CHECKING:
+    from zoology.config import TrainConfig
 
 
 MAX_WORKERS_PER_GPU = 1
 
 
-def execute_config(config: TrainConfig):
+def execute_config(config: "TrainConfig"):
+    from zoology.train import train
+
     try: 
         train(config=config)
     except Exception as e:
@@ -35,6 +38,7 @@ def main(python_file, outdir, name: str, parallelize: bool, gpus: str):
     if gpus is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
+    from zoology.train import train
 
     # Load the given Python file as a module
     spec = importlib.util.spec_from_file_location("config_module", python_file)
